@@ -1,0 +1,35 @@
+{
+  "name": "playwright-framework-for-gds-app",
+  "version": "1.0.0",
+  "description": "Playwright E2E UI test suite for the GDS Benefits Application Demo",
+  "scripts": {
+    "bddgen": "bddgen",
+    "test": "bddgen && playwright test",
+    "test:headed": "bddgen && playwright test --headed",
+    "test:debug": "bddgen && playwright test --debug",
+    "test:chromium": "bddgen && playwright test --project=chromium",
+    "test:firefox": "bddgen && playwright test --project=firefox",
+    "test:webkit": "bddgen && playwright test --project=webkit",
+    "test:mobile": "bddgen && playwright test --project=mobile-chrome --project=mobile-safari",
+    "test:smoke": "bddgen && playwright test --grep @smoke",
+    "test:e2e": "bddgen && playwright test --grep @e2e",
+    "test:validation": "bddgen && playwright test --grep @validation",
+    "test:report": "playwright show-report",
+    "test:ui": "bddgen && playwright test --ui"
+  },
+  "keywords": [
+    "playwright",
+    "e2e",
+    "testing",
+    "gds",
+    "govuk"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@types/node": "^25.9.2",
+    "playwright-bdd": "^9.0.0",
+    "typescript": "^6.0.3"
+  }
+}

@@ -1,0 +1,9 @@
+.playwright-mcp/
+playwright-report/
+test-results/
+allure-results/
+dist/
+node_modules/
+*.log
+# BDD generated test files (regenerated before each run)
+.features-gen/
