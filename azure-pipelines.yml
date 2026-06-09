@@ -1,6 +1,6 @@
 # Azure DevOps Pipelines — BDD Playwright UI Tests for GDS Demo App
 # Framework: playwright-bdd (Cucumber/Gherkin) + Page Object Model
-# Target: https://lokeshsharma99.github.io/GDS-Demo-App/
+# Target:    https://lokeshsharma99.github.io/GDS-Demo-App/
 
 trigger:
   branches:
@@ -13,6 +13,7 @@ trigger:
       - tests/**
       - playwright.config.ts
       - package*.json
+      - azure-pipelines.yml
 
 pr:
   branches:
@@ -22,7 +23,7 @@ pr:
 
 schedules:
   - cron: '0 6 * * *'
-    displayName: Daily smoke run
+    displayName: Daily smoke run (06:00 UTC)
     branches:
       include:
         - main
@@ -30,11 +31,11 @@ schedules:
 
 parameters:
   - name: tagsFilter
-    displayName: 'Cucumber tag filter (e.g. @smoke, @e2e, @validation)'
+    displayName: 'Cucumber tag filter (e.g. @smoke, @e2e, @validation — leave blank for all)'
     type: string
     default: ''
   - name: browsers
-    displayName: 'Browsers to test'
+    displayName: 'Browsers to include in full regression'
     type: object
     default:
       - chromium
@@ -46,155 +47,23 @@ variables:
   npm_config_cache: $(Pipeline.Workspace)/.npm
 
 stages:
-  # ─── Smoke Tests (PR gate) ────────────────────────────────────────────────
+
+  # Stage 1: Smoke Tests (PR gate - Chromium only, fast)
   - stage: SmokeTests
-    displayName: 'Smoke Tests (PR gate)'
+    displayName: 'Stage 1 - Smoke Tests (PR gate)'
     condition: eq(variables['Build.Reason'], 'PullRequest')
     jobs:
       - job: Smoke
-        displayName: 'BDD @smoke — Chromium'
+        displayName: 'BDD @smoke - Chromium'
         pool:
           vmImage: 'ubuntu-latest'
         timeoutInMinutes: 15
         steps:
+          - checkout: self
+            fetchDepth: 1
+
           - task: NodeTool@0
-            inputs:
-              versionSpec: $(NODE_VERSION)
-          - task: Cache@2
-            inputs:
-              key: 'npm | "$(Agent.OS)" | package-lock.json'
-              restoreKeys: 'npm | "$(Agent.OS)"'
-              path: $(npm_config_cache)
-          - script: npm ci
-            displayName: 'Install dependencies'
-          - script: npx playwright install --with-deps chromium
-            displayName: 'Install Playwright Chromium'
-          - script: npx bddgen
-            displayName: 'Generate BDD test files'
-          - script: npx playwright test --project=chromium --grep @smoke
-            displayName: 'Run @smoke BDD scenarios'
-            env:
-              CI: 'true'
-          - task: PublishTestResults@2
-            condition: always()
-            inputs:
-              testResultsFormat: 'JUnit'
-              testResultsFiles: 'test-results/junit.xml'
-              testRunTitle: 'BDD Smoke Tests — Chromium'
-          - task: PublishPipelineArtifact@1
-            condition: always()
-            inputs:
-              targetPath: 'playwright-report'
-              artifact: 'smoke-report-chromium'
-              publishLocation: 'pipeline'
-
-  # ─── Full BDD Regression ─────────────────────────────────────────────────
-  - stage: FullRegression
-    displayName: 'Full BDD Regression'
-    dependsOn: []
-    condition: not(eq(variables['Build.Reason'], 'PullRequest'))
-    jobs:
-      - job: BDDTests
-        displayName: 'BDD Tests — ${{ parameters.browsers }}
-        strategy:
-          matrix:
-            Chromium:
-              BROWSER: chromium
-            Firefox:
-              BROWSER: firefox
-            WebKit:
-              BROWSER: webkit
-        pool:
-          vmImage: 'ubuntu-latest'
-        timeoutInMinutes: 30
-        steps:
-          - task: NodeTool@0
-            inputs:
-              versionSpec: $(NODE_VERSION)
-          - task: Cache@2
-            inputs:
-              key: 'npm | "$(Agent.OS)" | package-lock.json'
-              restoreKeys: 'npm | "$(Agent.OS)"'
-              path: $(npm_config_cache)
-          - script: npm ci
-            displayName: 'Install dependencies'
-          - script: npx playwright install --with-deps $(BROWSER)
-            displayName: 'Install Playwright $(BROWSER)'
-          - script: npx bddgen
-            displayName: 'Generate BDD test files from .feature files'
-          - script: |
-              GREP_ARG=""
-              if [ -n "${{ parameters.tagsFilter }}" ]; then
-                GREP_ARG="--grep ${{ parameters.tagsFilter }}"
-              fi
-              npx playwright test --project=$(BROWSER) $GREP_ARG
-            displayName: 'Run BDD scenarios — $(BROWSER)'
-            env:
-              CI: 'true'
-          - task: PublishTestResults@2
-            condition: always()
-            inputs:
-              testResultsFormat: 'JUnit'
-              testResultsFiles: 'test-results/junit.xml'
-              testRunTitle: 'BDD Regression — $(BROWSER)'
-              failTaskOnFailedTests: true
-          - task: PublishPipelineArtifact@1
-            condition: always()
-            inputs:
-              targetPath: 'playwright-report'
-              artifact: 'playwright-report-$(BROWSER)'
-              publishLocation: 'pipeline'
-          - task: PublishPipelineArtifact@1
-            condition: failed()
-            inputs:
-              targetPath: 'test-results'
-              artifact: 'playwright-traces-$(BROWSER)'
-              publishLocation: 'pipeline'
-# Runs tests against: https://lokeshsharma99.github.io/GDS-Demo-App/
-
-trigger:
-  branches:
-    include:
-      - main
-      - master
-      - develop
-  paths:
-    include:
-      - tests/**
-      - playwright.config.ts
-      - package*.json
-
-pr:
-  branches:
-    include:
-      - main
-      - master
-
-schedules:
-  - cron: '0 6 * * *'
-    displayName: Daily smoke run
-    branches:
-      include:
-        - main
-    always: true
-
-variables:
-  NODE_VERSION: '20.x'
-  npm_config_cache: $(Pipeline.Workspace)/.npm
-
-stages:
-  # ─── Desktop Browsers ───────────────────────────────────────────────────────
-  - stage: DesktopTests
-    displayName: 'Desktop Browser Tests'
-    jobs:
-      - job: ChromiumTests
-        displayName: 'Chromium'
-        pool:
-          vmImage: 'ubuntu-latest'
-        timeoutInMinutes: 30
-        steps:
-          - task: NodeTool@0
-            displayName: 'Install Node.js $(NODE_VERSION)'
+            displayName: 'Use Node.js $(NODE_VERSION)'
             inputs:
               versionSpec: $(NODE_VERSION)
 
@@ -211,136 +80,69 @@ stages:
           - script: npx playwright install --with-deps chromium
             displayName: 'Install Playwright Chromium'
 
-          - script: npx playwright test --project=chromium
-            displayName: 'Run Chromium tests'
+          - script: npx bddgen
+            displayName: 'Generate BDD test files from .feature files'
+
+          - script: npx playwright test --project=chromium --grep "@smoke"
+            displayName: 'Run @smoke BDD scenarios'
             env:
               CI: 'true'
 
           - task: PublishTestResults@2
-            displayName: 'Publish test results'
+            displayName: 'Publish smoke test results'
             condition: always()
             inputs:
               testResultsFormat: 'JUnit'
               testResultsFiles: 'test-results/junit.xml'
-              testRunTitle: 'Playwright E2E — Chromium'
+              testRunTitle: 'BDD Smoke - Chromium'
               failTaskOnFailedTests: true
 
           - task: PublishPipelineArtifact@1
-            displayName: 'Publish HTML report'
+            displayName: 'Upload smoke HTML report'
             condition: always()
             inputs:
               targetPath: 'playwright-report'
-              artifact: 'playwright-report-chromium'
+              artifact: 'smoke-report-chromium'
               publishLocation: 'pipeline'
 
           - task: PublishPipelineArtifact@1
-            displayName: 'Publish failure traces'
+            displayName: 'Upload failure traces (smoke)'
             condition: failed()
             inputs:
               targetPath: 'test-results'
-              artifact: 'playwright-traces-chromium'
+              artifact: 'smoke-traces-chromium'
               publishLocation: 'pipeline'
 
-      - job: FirefoxTests
-        displayName: 'Firefox'
-        pool:
-          vmImage: 'ubuntu-latest'
-        timeoutInMinutes: 30
-        steps:
-          - task: NodeTool@0
-            inputs:
-              versionSpec: $(NODE_VERSION)
-
-          - task: Cache@2
-            inputs:
-              key: 'npm | "$(Agent.OS)" | package-lock.json'
-              restoreKeys: 'npm | "$(Agent.OS)"'
-              path: $(npm_config_cache)
-
-          - script: npm ci
-            displayName: 'Install dependencies'
-
-          - script: npx playwright install --with-deps firefox
-            displayName: 'Install Playwright Firefox'
-
-          - script: npx playwright test --project=firefox
-            displayName: 'Run Firefox tests'
-            env:
-              CI: 'true'
-
-          - task: PublishTestResults@2
-            condition: always()
-            inputs:
-              testResultsFormat: 'JUnit'
-              testResultsFiles: 'test-results/junit.xml'
-              testRunTitle: 'Playwright E2E — Firefox'
-              failTaskOnFailedTests: true
-
-          - task: PublishPipelineArtifact@1
-            condition: always()
-            inputs:
-              targetPath: 'playwright-report'
-              artifact: 'playwright-report-firefox'
-              publishLocation: 'pipeline'
-
-      - job: WebKitTests
-        displayName: 'WebKit (Safari)'
-        pool:
-          vmImage: 'ubuntu-latest'
-        timeoutInMinutes: 30
-        steps:
-          - task: NodeTool@0
-            inputs:
-              versionSpec: $(NODE_VERSION)
-
-          - task: Cache@2
-            inputs:
-              key: 'npm | "$(Agent.OS)" | package-lock.json'
-              restoreKeys: 'npm | "$(Agent.OS)"'
-              path: $(npm_config_cache)
-
-          - script: npm ci
-            displayName: 'Install dependencies'
-
-          - script: npx playwright install --with-deps webkit
-            displayName: 'Install Playwright WebKit'
-
-          - script: npx playwright test --project=webkit
-            displayName: 'Run WebKit tests'
-            env:
-              CI: 'true'
-
-          - task: PublishTestResults@2
-            condition: always()
-            inputs:
-              testResultsFormat: 'JUnit'
-              testResultsFiles: 'test-results/junit.xml'
-              testRunTitle: 'Playwright E2E — WebKit'
-              failTaskOnFailedTests: true
-
-          - task: PublishPipelineArtifact@1
-            condition: always()
-            inputs:
-              targetPath: 'playwright-report'
-              artifact: 'playwright-report-webkit'
-              publishLocation: 'pipeline'
-
-  # ─── Mobile Browsers ─────────────────────────────────────────────────────────
-  - stage: MobileTests
-    displayName: 'Mobile Browser Tests'
-    dependsOn: []   # Run in parallel with desktop
+  # Stage 2: Full BDD Regression (push / schedule / manual)
+  - stage: FullRegression
+    displayName: 'Stage 2 - Full BDD Regression'
+    dependsOn: []
+    condition: not(eq(variables['Build.Reason'], 'PullRequest'))
     jobs:
-      - job: MobileTests
-        displayName: 'Mobile Chrome + Safari'
+      - job: BDDTests
+        displayName: 'BDD Tests'
+        strategy:
+          matrix:
+            Chromium:
+              BROWSER: chromium
+            Firefox:
+              BROWSER: firefox
+            WebKit:
+              BROWSER: webkit
         pool:
           vmImage: 'ubuntu-latest'
         timeoutInMinutes: 30
         steps:
+          - checkout: self
+            fetchDepth: 1
+
           - task: NodeTool@0
+            displayName: 'Use Node.js $(NODE_VERSION)'
             inputs:
               versionSpec: $(NODE_VERSION)
 
           - task: Cache@2
+            displayName: 'Cache npm packages'
             inputs:
               key: 'npm | "$(Agent.OS)" | package-lock.json'
               restoreKeys: 'npm | "$(Agent.OS)"'
@@ -349,25 +151,43 @@ stages:
           - script: npm ci
             displayName: 'Install dependencies'
 
-          - script: npx playwright install --with-deps chromium webkit
-            displayName: 'Install Playwright browsers'
+          - script: npx playwright install --with-deps $(BROWSER)
+            displayName: 'Install Playwright $(BROWSER)'
 
-          - script: npx playwright test --project=mobile-chrome --project=mobile-safari
-            displayName: 'Run mobile tests'
+          - script: npx bddgen
+            displayName: 'Generate BDD test files from .feature files'
+
+          - script: |
+              GREP_ARG=""
+              if [ -n "${{ parameters.tagsFilter }}" ]; then
+                GREP_ARG="--grep ${{ parameters.tagsFilter }}"
+              fi
+              npx playwright test --project=$(BROWSER) $GREP_ARG
+            displayName: 'Run BDD scenarios - $(BROWSER)'
             env:
               CI: 'true'
 
           - task: PublishTestResults@2
+            displayName: 'Publish test results - $(BROWSER)'
             condition: always()
             inputs:
               testResultsFormat: 'JUnit'
               testResultsFiles: 'test-results/junit.xml'
-              testRunTitle: 'Playwright E2E — Mobile'
+              testRunTitle: 'BDD Regression - $(BROWSER)'
               failTaskOnFailedTests: true
 
           - task: PublishPipelineArtifact@1
+            displayName: 'Upload HTML report - $(BROWSER)'
             condition: always()
             inputs:
               targetPath: 'playwright-report'
-              artifact: 'playwright-report-mobile'
+              artifact: 'playwright-report-$(BROWSER)'
+              publishLocation: 'pipeline'
+
+          - task: PublishPipelineArtifact@1
+            displayName: 'Upload failure traces - $(BROWSER)'
+            condition: failed()
+            inputs:
+              targetPath: 'test-results'
+              artifact: 'playwright-traces-$(BROWSER)'
               publishLocation: 'pipeline'
