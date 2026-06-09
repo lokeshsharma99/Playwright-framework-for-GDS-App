@@ -75,3 +75,8 @@ Feature: Personal Details — Step 1 of 4
   Scenario: Back link returns to the landing page
     When I click back
     Then I should be on the landing page
+
+  # DELIBERATE FAIL — verifies CI correctly reports failures
+  @wip @xfail
+  Scenario: [EXPECTED FAIL] Personal details page heading should show wrong text
+    Then I should see the heading "Apply for Housing Benefit"

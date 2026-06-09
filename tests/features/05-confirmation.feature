@@ -36,3 +36,8 @@ Feature: Application Confirmation — Step 4 of 4
     When I click "Return to services"
     Then I should be on the landing page
     And the start button should be disabled
+
+  # DELIBERATE FAIL — verifies CI correctly reports failures
+  @wip @xfail
+  Scenario: [EXPECTED FAIL] Confirmation page should show wrong reference prefix
+    Then I should see a reference number starting with "JSA-"

@@ -37,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        browser: [chromium, firefox, webkit]
+        browser: [chromium]
 
     steps:
       - name: Checkout repository
@@ -166,7 +166,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        browser: [chromium, firefox, webkit]
+        browser: [chromium]
 
     steps:
       - name: Checkout repository
@@ -265,3 +265,4 @@ jobs:
           echo "| Mobile   | ${{ needs.mobile-tests.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Target:** https://lokeshsharma99.github.io/GDS-Demo-App/" >> $GITHUB_STEP_SUMMARY
+

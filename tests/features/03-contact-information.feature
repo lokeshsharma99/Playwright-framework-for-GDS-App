@@ -58,3 +58,8 @@ Feature: Contact Information — Step 2 of 4
   Scenario: Previous button navigates back to personal details
     When I click previous
     Then I should be on the "Personal Details" page
+
+  # DELIBERATE FAIL — verifies CI correctly reports failures
+  @wip @xfail
+  Scenario: [EXPECTED FAIL] Contact page should display a non-existent field
+    Then I should see the "Sort code" field

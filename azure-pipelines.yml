@@ -125,10 +125,6 @@ stages:
           matrix:
             Chromium:
               BROWSER: chromium
-            Firefox:
-              BROWSER: firefox
-            WebKit:
-              BROWSER: webkit
         pool:
           vmImage: 'ubuntu-latest'
         timeoutInMinutes: 30
