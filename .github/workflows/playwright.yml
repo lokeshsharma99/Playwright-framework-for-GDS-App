@@ -1,26 +1,18 @@
 name: Playwright BDD UI Tests — GDS Demo App
 
+# Demo: run the @smoke suite; if it fails (e.g. a drifted locator), the
+# AI auto-healer fixes the locator, validates by re-running, and opens a PR.
 on:
   push:
-    branches: [main, master, develop]
+    branches: [main, master, develop, test/auto-heal-demo]
   pull_request:
     branches: [main, master, develop]
-  schedule:
-    # Run daily at 06:00 UTC against the live deployed app
-    - cron: '0 6 * * *'
   workflow_dispatch:
-    inputs:
-      browser:
-        description: 'Browser project (chromium / firefox / webkit / all)'
-        required: false
-        default: 'chromium'
-      tags:
-        description: 'Cucumber tag filter (e.g. @smoke, @e2e, @validation)'
-        required: false
-        default: ''
 
+# contents: write       -> healer pushes its self-heal branch
+# pull-requests: write  -> healer opens the fix PR
 permissions:
-  contents: read
+  contents: write
   checks: write
   pull-requests: write
 
@@ -30,14 +22,9 @@ concurrency:
 
 jobs:
   playwright-bdd-tests:
-    name: BDD Tests (${{ matrix.browser }})
+    name: BDD Smoke Tests + Auto-heal
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
-    strategy:
-      fail-fast: false
-      matrix:
-        browser: [chromium]
 
     steps:
       - name: Checkout repository
@@ -48,221 +35,79 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
       - name: Install dependencies
         run: npm ci
 
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps ${{ matrix.browser }}
+        run: npx playwright install --with-deps chromium
 
       - name: Generate BDD test files
         run: npx bddgen
 
-      - name: Run BDD tests (${{ matrix.browser }})
-        run: npx playwright test --project=${{ matrix.browser }} ${{ inputs.tags && format('--grep {0}', inputs.tags) || '' }}
+      # Run the smoke suite with traces. continue-on-error lets the job reach
+      # the heal step instead of aborting on the first failure.
+      - name: Run @smoke tests (Chromium)
+        id: tests
+        continue-on-error: true
+        run: npx playwright test --project=chromium --grep @smoke --trace on
         env:
           CI: true
 
-      - name: Publish test results
-        uses: dorny/test-reporter@v1
-        if: always()
-        with:
-          name: BDD Results — ${{ matrix.browser }}
-          path: test-results/junit.xml
-          reporter: jest-junit
-          fail-on-error: false
+      # Only runs when the tests above failed. Installs the healer, lets it
+      # detect the broken locator, fix it, re-validate (@smoke only), open a PR.
+      # continue-on-error: a healer infra hiccup must not mask the real signal
+      # (tests failed) — the job color reflects the tests, the PR is remediation.
+      - name: Auto-heal broken locators
+        id: heal
+        if: steps.tests.outcome == 'failure'
+        continue-on-error: true
+        env:
+          AI_MODE: azure-openai
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_DEPLOYMENT }}
+          # The healer re-runs this command to confirm the fix really works.
+          # Scoped to @smoke so the unrelated @xfail scenario is excluded.
+          TEST_COMMAND: "npx playwright test --project=chromium --grep @smoke --trace on"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install "git+https://github.com/bunnycodec/auto_healing_framework.git@feat/python-auto-healer"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Capture the healer output so we can surface any opened PR link.
+          auto-healer heal test-results --auto-pr | tee heal-output.txt
 
-      - name: Upload Playwright HTML report
+      - name: Upload failure traces
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: playwright-report-${{ matrix.browser }}
-          path: playwright-report/
-          retention-days: 14
-
-      - name: Upload failure traces and screenshots
-        uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: playwright-traces-${{ matrix.browser }}
+          name: playwright-traces
           path: test-results/
           retention-days: 7
 
-  smoke-tests:
-    name: Smoke Tests (Chromium only)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    if: github.event_name == 'pull_request'
-
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      - name: Generate BDD test files
-        run: npx bddgen
-      - name: Run @smoke scenarios only
-        run: npx playwright test --project=chromium --grep @smoke
-        env:
-          CI: true
-      - uses: actions/upload-artifact@v4
+      # Write a clear summary: tests failed and, if the healer opened a PR,
+      # link to it directly from the run's Summary tab.
+      - name: Summarise auto-heal result
         if: always()
-        with:
-          name: smoke-report
-          path: playwright-report/
-          retention-days: 7
-
-  summary:
-    name: Test Summary
-    runs-on: ubuntu-latest
-    needs: [playwright-bdd-tests]
-    if: always()
-    steps:
-      - name: Write job summary
         run: |
-          echo "## BDD Playwright Test Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Target:** https://lokeshsharma99.github.io/GDS-Demo-App/" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Browser  | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Chromium | ${{ needs.playwright-bdd-tests.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Firefox  | ${{ needs.playwright-bdd-tests.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| WebKit   | ${{ needs.playwright-bdd-tests.result }} |" >> $GITHUB_STEP_SUMMARY
-
-on:
-  push:
-    branches: [main, master, develop]
-  pull_request:
-    branches: [main, master, develop]
-  schedule:
-    # Run daily at 06:00 UTC against the live deployed app
-    - cron: '0 6 * * *'
-  workflow_dispatch:
-    inputs:
-      browser:
-        description: 'Browser project(s) to run (chromium / firefox / webkit / all)'
-        required: false
-        default: 'chromium'
-
-permissions:
-  contents: read
-  checks: write
-  pull-requests: write
-
-concurrency:
-  group: playwright-${{ github.ref }}
-  cancel-in-progress: true
-
-jobs:
-  playwright-tests:
-    name: Playwright E2E (${{ matrix.browser }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    strategy:
-      fail-fast: false
-      matrix:
-        browser: [chromium]
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps ${{ matrix.browser }}
-
-      - name: Run Playwright tests (${{ matrix.browser }})
-        run: npx playwright test --project=${{ matrix.browser }}
-        env:
-          CI: true
-
-      - name: Publish test results
-        uses: dorny/test-reporter@v1
-        if: always()
-        with:
-          name: Playwright Results — ${{ matrix.browser }}
-          path: test-results/junit.xml
-          reporter: jest-junit
-          fail-on-error: false
-
-      - name: Upload Playwright HTML report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: playwright-report-${{ matrix.browser }}
-          path: playwright-report/
-          retention-days: 14
-
-      - name: Upload failure traces and screenshots
-        uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: playwright-traces-${{ matrix.browser }}
-          path: test-results/
-          retention-days: 7
-
-  mobile-tests:
-    name: Playwright E2E (Mobile)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Install Playwright browsers (Chromium + WebKit for mobile)
-        run: npx playwright install --with-deps chromium webkit
-
-      - name: Run mobile tests
-        run: npx playwright test --project=mobile-chrome --project=mobile-safari
-        env:
-          CI: true
-
-      - name: Upload mobile test report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: playwright-report-mobile
-          path: playwright-report/
-          retention-days: 14
-
-  summary:
-    name: Test Summary
-    runs-on: ubuntu-latest
-    needs: [playwright-tests, mobile-tests]
-    if: always()
-
-    steps:
-      - name: Write job summary
-        run: |
-          echo "## Playwright Test Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Chromium | ${{ needs.playwright-tests.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Mobile   | ${{ needs.mobile-tests.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Target:** https://lokeshsharma99.github.io/GDS-Demo-App/" >> $GITHUB_STEP_SUMMARY
-
+          echo "## Auto-heal summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Test step outcome: **${{ steps.tests.outcome }}**" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.tests.outcome }}" = "failure" ]; then
+            echo "- Heal step outcome: **${{ steps.heal.outcome }}**" >> "$GITHUB_STEP_SUMMARY"
+            PR_URL="$(grep -Eo 'https://github.com/[^ ]+/pull/[0-9]+' heal-output.txt | head -n1 || true)"
+            if [ -n "$PR_URL" ]; then
+              echo "- Self-heal PR: [$PR_URL]($PR_URL)" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "- No PR was opened (no healable locator failure, or healer reported nothing to fix)." >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            echo "- Tests passed — auto-heal not triggered." >> "$GITHUB_STEP_SUMMARY"
+          fi

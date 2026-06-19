@@ -55,7 +55,7 @@ export class LandingPage extends BasePage {
 
   // The "Start now" button uses aria-disabled, NOT the HTML disabled attribute
   get startNowButton(): Locator {
-    return this.page.getByRole('button', { name: /Start now/i });
+    return this.page.getByRole('button', { name: 'Start now' });
   }
 
   get beforeYouStartHeading(): Locator {
