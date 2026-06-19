@@ -33,7 +33,7 @@ export class PersonalDetailsPage extends BasePage {
   }
 
   get dobDayInput(): Locator {
-    return this.page.getByRole('textbox', { name: 'Day' });
+    return this.page.getByRole('textbox', { name: 'Dayy' });
   }
 
   get dobMonthInput(): Locator {
@@ -49,7 +49,7 @@ export class PersonalDetailsPage extends BasePage {
   }
 
   get continueButton(): Locator {
-    return this.page.getByRole('button', { name: 'Continue' });
+    return this.page.getByRole('button', { name: 'Continu' });
   }
 
   get backLink(): Locator {

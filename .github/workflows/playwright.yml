@@ -82,7 +82,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           # Capture the healer output so we can surface any opened PR link.
-          auto-healer heal test-results --auto-pr | tee heal-output.txt
+          # --validate-once: many distinct locators are broken; apply ALL fixes,
+          # then validate with a single re-run (sequential mode would revert each
+          # fix because the other locators are still broken).
+          auto-healer heal test-results --auto-pr --validate-once | tee heal-output.txt
 
       - name: Upload failure traces
         uses: actions/upload-artifact@v4
