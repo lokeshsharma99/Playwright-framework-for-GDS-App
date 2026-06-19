@@ -61,8 +61,12 @@ jobs:
 
       # Only runs when the tests above failed. Installs the healer, lets it
       # detect the broken locator, fix it, re-validate (@smoke only), open a PR.
+      # continue-on-error: a healer infra hiccup must not mask the real signal
+      # (tests failed) — the job color reflects the tests, the PR is remediation.
       - name: Auto-heal broken locators
+        id: heal
         if: steps.tests.outcome == 'failure'
+        continue-on-error: true
         env:
           AI_MODE: azure-openai
           AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
@@ -77,7 +81,8 @@ jobs:
           pip install "git+https://github.com/bunnycodec/auto_healing_framework.git@feat/python-auto-healer"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          auto-healer heal test-results --auto-pr
+          # Capture the healer output so we can surface any opened PR link.
+          auto-healer heal test-results --auto-pr | tee heal-output.txt
 
       - name: Upload failure traces
         uses: actions/upload-artifact@v4
@@ -87,10 +92,22 @@ jobs:
           path: test-results/
           retention-days: 7
 
-      - name: Reflect test result
+      # Write a clear summary: tests failed and, if the healer opened a PR,
+      # link to it directly from the run's Summary tab.
+      - name: Summarise auto-heal result
         if: always()
         run: |
-          echo "Test step outcome: ${{ steps.tests.outcome }}"
+          echo "## Auto-heal summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Test step outcome: **${{ steps.tests.outcome }}**" >> "$GITHUB_STEP_SUMMARY"
           if [ "${{ steps.tests.outcome }}" = "failure" ]; then
-            echo "Tests failed — the auto-healer ran. Check for a self-heal PR."
+            echo "- Heal step outcome: **${{ steps.heal.outcome }}**" >> "$GITHUB_STEP_SUMMARY"
+            PR_URL="$(grep -Eo 'https://github.com/[^ ]+/pull/[0-9]+' heal-output.txt | head -n1 || true)"
+            if [ -n "$PR_URL" ]; then
+              echo "- Self-heal PR: [$PR_URL]($PR_URL)" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "- No PR was opened (no healable locator failure, or healer reported nothing to fix)." >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            echo "- Tests passed — auto-heal not triggered." >> "$GITHUB_STEP_SUMMARY"
           fi
