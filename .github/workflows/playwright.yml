@@ -95,6 +95,27 @@ jobs:
           path: test-results/
           retention-days: 7
 
+      - name: Auto-merge heal PR (lower env policy)
+        if: steps.heal.outcome == 'success' && github.ref_name == 'test/auto-heal-demo'
+        continue-on-error: true
+        run: |
+          # Extract the PR URL from healer output and auto-merge it.
+          # This is the lower-env strategy: heals are auto-merged after validation.
+          # (In prod, you'd skip this step to require human review.)
+          PR_URL="$(grep -Eo 'https://github.com/[^ ]+/pull/[0-9]+' heal-output.txt | head -n1 || true)"
+          if [ -n "$PR_URL" ]; then
+            # Extract owner/repo and PR number for gh pr merge
+            REPO="$(echo "$PR_URL" | sed 's|https://github.com/||' | sed 's|/pull/.*||')"
+            PR_NUM="$(echo "$PR_URL" | grep -oE '[0-9]+$')"
+            gh pr merge "$PR_NUM" --repo "$REPO" --auto --squash \
+              --delete-branch \
+              --subject "auto: heal locators on test/auto-heal-demo" \
+              --body "Auto-healed and merged by CI (lower env policy)" || true
+            echo "✅ Auto-merged heal PR #$PR_NUM"
+          else
+            echo "ℹ️  No heal PR to merge"
+          fi
+
       # Write a clear summary: tests failed and, if the healer opened a PR,
       # link to it directly from the run's Summary tab.
       - name: Summarise auto-heal result
